@@ -76,10 +76,19 @@ class Database:
         self.conn.commit()
 
     def upsert_targets(self, target_qqs: list[str]) -> None:
-        if not target_qqs:
-            return
+        normalized = sorted({qq.strip() for qq in target_qqs if qq.strip()})
+
+        if normalized:
+            placeholders = ",".join("?" for _ in normalized)
+            self.conn.execute(
+                f"DELETE FROM targets WHERE qq NOT IN ({placeholders})",
+                normalized,
+            )
+        else:
+            self.conn.execute("DELETE FROM targets")
+
         now = utc_now()
-        for qq in target_qqs:
+        for qq in normalized:
             self.conn.execute(
                 """
                 INSERT INTO targets (qq, created_at)
