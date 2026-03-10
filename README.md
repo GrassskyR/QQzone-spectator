@@ -7,6 +7,7 @@
 ## 功能特性
 
 - 自动拉取指定目标 QQ 的空间动态。
+- 严格校验动态发布者 QQ，若与目标 QQ 不一致则跳过，避免误采集。
 - 本地 SQLite 持久化保存动态文本、发布时间、原始载荷。
 - 自动下载动态图片到本地目录并记录文件映射。
 - 可选对接 OneBot（推荐 NoneBot2 + OneBot v11 生态）推送新动态。
@@ -107,6 +108,7 @@ qqzone-spectator run
 - `qqzone-spectator list-targets`：列出已启用采集目标。
 - `qqzone-spectator crawl-once [--no-push]`：执行一次采集。
 - `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集。
+- 全局参数：`--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`，默认 `INFO`。
 
 ## OneBot 集成说明
 

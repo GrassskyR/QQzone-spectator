@@ -7,6 +7,7 @@ Language: [简体中文](README.md) | English
 ## Features
 
 - Pull QQZone posts for configured target QQ accounts.
+- Enforce strict owner verification and skip posts whose author QQ does not match the target QQ.
 - Persist post text, publish time, and raw payload in SQLite.
 - Download post images to local storage and keep file mappings.
 - Optionally push new posts through OneBot (recommended stack: NoneBot2 + OneBot v11).
@@ -107,6 +108,7 @@ Main variables in `.env.example`:
 - `qqzone-spectator list-targets`: list enabled target QQ accounts.
 - `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle.
 - `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode.
+- Global option: `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` (default: `INFO`).
 
 ## OneBot Integration
 

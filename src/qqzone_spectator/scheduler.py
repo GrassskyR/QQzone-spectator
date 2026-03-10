@@ -12,6 +12,15 @@ from .push import OneBotClient, build_post_message
 LOGGER = logging.getLogger(__name__)
 
 
+def build_content_preview(content: str, max_length: int = 60) -> str:
+    normalized = " ".join(content.split())
+    if not normalized:
+        return "(no text content)"
+    if len(normalized) <= max_length:
+        return normalized
+    return f"{normalized[: max_length - 3]}..."
+
+
 class SchedulerService:
     def __init__(
         self,
@@ -58,18 +67,59 @@ class SchedulerService:
         if not targets:
             raise RuntimeError("No target QQ found. Set TARGET_QQS and run init-db first.")
 
+        LOGGER.info(
+            "CRAWL_START targets=%s fetch_limit=%s push_enabled=%s",
+            len(targets),
+            self.config.fetch_limit,
+            push_enabled,
+        )
+
         run_id = self.db.record_crawl_start()
         fetched_posts = 0
         inserted_posts = 0
+        skipped_owner_mismatch = 0
 
         try:
             for target_qq in targets:
+                LOGGER.info("TARGET_START qq=%s", target_qq)
                 raw_posts = self.qzone_client.fetch_posts(target_qq, num=self.config.fetch_limit)
                 posts = parse_posts(target_qq, raw_posts)
                 fetched_posts += len(posts)
 
-                for post in posts:
+                LOGGER.info("TARGET_FETCHED qq=%s posts=%s", target_qq, len(posts))
+
+                for index, post in enumerate(posts, start=1):
+                    if post.author_qq and post.author_qq != post.target_qq:
+                        skipped_owner_mismatch += 1
+                        LOGGER.info(
+                            "Crawling [%s] qq=%s author=%s post=%s idx=%s/%s status=owner-mismatch-skip",
+                            build_content_preview(post.content),
+                            post.target_qq,
+                            post.author_qq,
+                            post.post_id,
+                            index,
+                            len(posts),
+                        )
+                        LOGGER.warning(
+                            "OWNER_MISMATCH_SKIP target=%s author=%s post=%s",
+                            post.target_qq,
+                            post.author_qq,
+                            post.post_id,
+                        )
+                        continue
+
                     is_new = self.db.save_post(post)
+                    status = "new" if is_new else "duplicate"
+                    LOGGER.info(
+                        "Crawling [%s] qq=%s post=%s idx=%s/%s status=%s",
+                        build_content_preview(post.content),
+                        post.target_qq,
+                        post.post_id,
+                        index,
+                        len(posts),
+                        status,
+                    )
+
                     if not is_new:
                         continue
 
@@ -86,7 +136,19 @@ class SchedulerService:
                 inserted_posts=inserted_posts,
                 error_message=None,
             )
-            return {"fetched": fetched_posts, "inserted": inserted_posts}
+
+            LOGGER.info(
+                "CRAWL_DONE run_id=%s fetched=%s inserted=%s skipped_owner_mismatch=%s",
+                run_id,
+                fetched_posts,
+                inserted_posts,
+                skipped_owner_mismatch,
+            )
+            return {
+                "fetched": fetched_posts,
+                "inserted": inserted_posts,
+                "skipped_owner_mismatch": skipped_owner_mismatch,
+            }
         except Exception as exc:
             self.db.record_crawl_finish(
                 run_id,
@@ -95,6 +157,14 @@ class SchedulerService:
                 inserted_posts=inserted_posts,
                 error_message=str(exc),
             )
+            LOGGER.error(
+                "CRAWL_FAILED run_id=%s fetched=%s inserted=%s skipped_owner_mismatch=%s error=%s",
+                run_id,
+                fetched_posts,
+                inserted_posts,
+                skipped_owner_mismatch,
+                exc,
+            )
             raise
 
     def run_loop(self, interval_seconds: int, *, push_enabled: bool = True) -> None:
@@ -102,9 +172,10 @@ class SchedulerService:
             try:
                 result = self.crawl_once(push_enabled=push_enabled)
                 LOGGER.info(
-                    "crawl done: fetched=%s inserted=%s",
+                    "crawl done: fetched=%s inserted=%s skipped_owner_mismatch=%s",
                     result["fetched"],
                     result["inserted"],
+                    result.get("skipped_owner_mismatch", 0),
                 )
             except Exception:
                 LOGGER.exception("crawl cycle failed")
@@ -131,6 +202,13 @@ class SchedulerService:
 
             downloaded.append(local_path)
             self.db.update_media_local_path(post.target_qq, post.post_id, media.url, local_path)
+            LOGGER.info(
+                "MEDIA_DOWNLOADED qq=%s post=%s index=%s path=%s",
+                post.target_qq,
+                post.post_id,
+                index,
+                local_path,
+            )
 
         return downloaded
 
@@ -147,6 +225,13 @@ class SchedulerService:
             try:
                 self.onebot_client.send_private_msg(user_id, message)
             except Exception as exc:
+                LOGGER.warning(
+                    "PUSH_FAILED type=private target=%s qq=%s post=%s error=%s",
+                    user_id,
+                    post.target_qq,
+                    post.post_id,
+                    exc,
+                )
                 self.db.record_push_result(
                     target_qq=post.target_qq,
                     post_id=post.post_id,
@@ -157,6 +242,12 @@ class SchedulerService:
                 )
                 continue
 
+            LOGGER.info(
+                "PUSH_SENT type=private target=%s qq=%s post=%s",
+                user_id,
+                post.target_qq,
+                post.post_id,
+            )
             self.db.record_push_result(
                 target_qq=post.target_qq,
                 post_id=post.post_id,
@@ -173,6 +264,13 @@ class SchedulerService:
             try:
                 self.onebot_client.send_group_msg(group_id, message)
             except Exception as exc:
+                LOGGER.warning(
+                    "PUSH_FAILED type=group target=%s qq=%s post=%s error=%s",
+                    group_id,
+                    post.target_qq,
+                    post.post_id,
+                    exc,
+                )
                 self.db.record_push_result(
                     target_qq=post.target_qq,
                     post_id=post.post_id,
@@ -183,6 +281,12 @@ class SchedulerService:
                 )
                 continue
 
+            LOGGER.info(
+                "PUSH_SENT type=group target=%s qq=%s post=%s",
+                group_id,
+                post.target_qq,
+                post.post_id,
+            )
             self.db.record_push_result(
                 target_qq=post.target_qq,
                 post_id=post.post_id,

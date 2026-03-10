@@ -16,6 +16,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=".env",
         help="Path to .env file (default: .env)",
     )
+    parser.add_argument(
+        "--log-level",
+        default="INFO",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+        help="Logging level (default: INFO)",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -50,13 +56,14 @@ def require_crawl_config(config: AppConfig) -> None:
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-    )
-
     parser = build_parser()
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=getattr(logging, args.log_level.upper(), logging.INFO),
+        format="[%(levelname)s][%(asctime)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
 
     config = AppConfig.from_env(Path(args.env_file))
     config.ensure_directories()
@@ -86,7 +93,13 @@ def main() -> None:
 
         if args.command == "crawl-once":
             result = service.crawl_once(push_enabled=not args.no_push)
-            print(f"fetched={result['fetched']} inserted={result['inserted']}")
+            print(
+                "fetched={fetched} inserted={inserted} skipped_owner_mismatch={skipped}".format(
+                    fetched=result["fetched"],
+                    inserted=result["inserted"],
+                    skipped=result.get("skipped_owner_mismatch", 0),
+                )
+            )
             return
 
         if args.command == "run":

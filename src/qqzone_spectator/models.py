@@ -13,6 +13,7 @@ class MediaItem:
 @dataclass(slots=True)
 class QzonePost:
     target_qq: str
+    author_qq: str
     post_id: str
     content: str
     created_at: str

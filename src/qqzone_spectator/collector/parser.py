@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,10 +19,19 @@ MEDIA_URL_KEYS = (
     "smallurl",
 )
 
+AUTHOR_QQ_KEYS = (
+    "uin",
+    "opuin",
+    "hostuin",
+    "hostUin",
+    "owner_uin",
+)
+
 
 def parse_posts(target_qq: str, raw_posts: list[dict[str, Any]]) -> list[QzonePost]:
     posts: list[QzonePost] = []
     for raw in raw_posts:
+        author_qq = extract_author_qq(raw, default_target_qq=target_qq)
         post_id = _extract_post_id(raw)
         content = _extract_content(raw)
         created_at = _extract_created_at(raw)
@@ -31,6 +41,7 @@ def parse_posts(target_qq: str, raw_posts: list[dict[str, Any]]) -> list[QzonePo
         posts.append(
             QzonePost(
                 target_qq=target_qq,
+                author_qq=author_qq,
                 post_id=post_id,
                 content=content,
                 created_at=created_at,
@@ -41,6 +52,62 @@ def parse_posts(target_qq: str, raw_posts: list[dict[str, Any]]) -> list[QzonePo
 
     posts.sort(key=lambda item: item.created_at)
     return posts
+
+
+def extract_author_qq(raw: dict[str, Any], default_target_qq: str = "") -> str:
+    for key in AUTHOR_QQ_KEYS:
+        normalized = _normalize_qq(raw.get(key))
+        if normalized:
+            return normalized
+
+    for key in ("userinfo", "userInfo"):
+        user_info = raw.get(key)
+        normalized = _extract_author_from_user_info(user_info)
+        if normalized:
+            return normalized
+
+    return default_target_qq.strip()
+
+
+def _extract_author_from_user_info(user_info: Any) -> str:
+    if isinstance(user_info, dict):
+        for key in (*AUTHOR_QQ_KEYS, "qq", "id"):
+            normalized = _normalize_qq(user_info.get(key))
+            if normalized:
+                return normalized
+        return ""
+
+    if isinstance(user_info, list):
+        for item in user_info:
+            if isinstance(item, dict):
+                normalized = _extract_author_from_user_info(item)
+                if normalized:
+                    return normalized
+        return ""
+
+    return ""
+
+
+def _normalize_qq(value: Any) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return ""
+        return str(int(value))
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        if text.isdigit():
+            return text
+        match = re.search(r"\d+", text)
+        if match:
+            return match.group(0)
+
+    return ""
 
 
 def _extract_post_id(raw: dict[str, Any]) -> str:

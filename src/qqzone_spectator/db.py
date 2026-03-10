@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sqlite3
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -31,6 +33,7 @@ class Database:
             CREATE TABLE IF NOT EXISTS posts (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 target_qq TEXT NOT NULL,
+                author_qq TEXT NOT NULL DEFAULT '',
                 post_id TEXT NOT NULL,
                 content TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
@@ -73,7 +76,94 @@ class Database:
             );
             """
         )
+        self._ensure_posts_author_column()
+        self._backfill_posts_author_qq()
+        self.purge_owner_mismatch_posts()
+        self._ensure_posts_author_post_unique_index()
         self.conn.commit()
+
+    def _ensure_posts_author_column(self) -> None:
+        columns = self.conn.execute("PRAGMA table_info(posts)").fetchall()
+        if any(str(column["name"]) == "author_qq" for column in columns):
+            return
+        self.conn.execute(
+            "ALTER TABLE posts ADD COLUMN author_qq TEXT NOT NULL DEFAULT ''"
+        )
+
+    def _backfill_posts_author_qq(self) -> None:
+        rows = self.conn.execute(
+            """
+            SELECT id, target_qq, source_payload
+            FROM posts
+            WHERE COALESCE(author_qq, '') = ''
+            """
+        ).fetchall()
+
+        for row in rows:
+            author_qq = _extract_author_qq_from_payload(str(row["source_payload"]))
+            if not author_qq:
+                author_qq = str(row["target_qq"])
+            self.conn.execute(
+                "UPDATE posts SET author_qq = ? WHERE id = ?",
+                (author_qq, int(row["id"])),
+            )
+
+    def purge_owner_mismatch_posts(self) -> int:
+        row = self.conn.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM posts
+            WHERE COALESCE(author_qq, '') <> ''
+              AND target_qq <> author_qq
+            """
+        ).fetchone()
+        total = int(row["total"]) if row is not None else 0
+        if total <= 0:
+            return 0
+
+        self.conn.execute(
+            """
+            DELETE FROM media
+            WHERE EXISTS (
+                SELECT 1
+                FROM posts
+                WHERE COALESCE(author_qq, '') <> ''
+                  AND target_qq <> author_qq
+                  AND posts.target_qq = media.target_qq
+                  AND posts.post_id = media.post_id
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            DELETE FROM push_records
+            WHERE EXISTS (
+                SELECT 1
+                FROM posts
+                WHERE COALESCE(author_qq, '') <> ''
+                  AND target_qq <> author_qq
+                  AND posts.target_qq = push_records.target_qq
+                  AND posts.post_id = push_records.post_id
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            DELETE FROM posts
+            WHERE COALESCE(author_qq, '') <> ''
+              AND target_qq <> author_qq
+            """
+        )
+        self.conn.commit()
+        return total
+
+    def _ensure_posts_author_post_unique_index(self) -> None:
+        self.conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_posts_author_post
+            ON posts(author_qq, post_id)
+            """
+        )
 
     def upsert_targets(self, target_qqs: list[str]) -> None:
         normalized = sorted({qq.strip() for qq in target_qqs if qq.strip()})
@@ -136,11 +226,12 @@ class Database:
         try:
             self.conn.execute(
                 """
-                INSERT INTO posts (target_qq, post_id, content, created_at, source_payload, inserted_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO posts (target_qq, author_qq, post_id, content, created_at, source_payload, inserted_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     post.target_qq,
+                    post.author_qq,
                     post.post_id,
                     post.content,
                     post.created_at,
@@ -234,3 +325,66 @@ class Database:
 
     def close(self) -> None:
         self.conn.close()
+
+
+def _extract_author_qq_from_payload(payload: str) -> str:
+    try:
+        raw = json.loads(payload)
+    except json.JSONDecodeError:
+        return ""
+
+    if not isinstance(raw, dict):
+        return ""
+
+    for key in ("uin", "opuin", "hostuin", "hostUin", "owner_uin"):
+        normalized = _normalize_qq(raw.get(key))
+        if normalized:
+            return normalized
+
+    for key in ("userinfo", "userInfo"):
+        normalized = _extract_author_from_user_info(raw.get(key))
+        if normalized:
+            return normalized
+
+    return ""
+
+
+def _extract_author_from_user_info(user_info: object) -> str:
+    if isinstance(user_info, dict):
+        for key in ("uin", "opuin", "hostuin", "hostUin", "owner_uin", "qq", "id"):
+            normalized = _normalize_qq(user_info.get(key))
+            if normalized:
+                return normalized
+        return ""
+
+    if isinstance(user_info, list):
+        for item in user_info:
+            if not isinstance(item, dict):
+                continue
+            normalized = _extract_author_from_user_info(item)
+            if normalized:
+                return normalized
+
+    return ""
+
+
+def _normalize_qq(value: object) -> str:
+    if value is None:
+        return ""
+
+    if isinstance(value, (int, float)):
+        if value <= 0:
+            return ""
+        return str(int(value))
+
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return ""
+        if text.isdigit():
+            return text
+        match = re.search(r"\d+", text)
+        if match:
+            return match.group(0)
+
+    return ""
