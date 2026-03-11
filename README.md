@@ -10,6 +10,7 @@
 - 严格校验动态发布者 QQ，若与目标 QQ 不一致则跳过，避免误采集。
 - 本地 SQLite 持久化保存动态文本、发布时间、原始载荷。
 - 自动下载动态图片到本地目录并记录文件映射。
+- 支持将单个目标账号的动态导出为 A4 PDF 时间线（可嵌入本地图片）。
 - 可选对接 OneBot（推荐 NoneBot2 + OneBot v11 生态）推送新动态。
 - 支持单次执行和循环轮询两种模式。
 
@@ -30,6 +31,8 @@ QQzone-spectator/
       downloader.py
     push/
       onebot.py
+    exporter/
+      service.py
     scheduler.py
     cli.py
   data/
@@ -85,6 +88,12 @@ qqzone-spectator crawl-once
 qqzone-spectator run
 ```
 
+9. 导出单目标动态为 PDF（A4 时间线模板）：
+
+```bash
+qqzone-spectator export-pdf --target-qq 1224944928
+```
+
 ## 配置项说明
 
 `.env.example` 中主要变量如下：
@@ -108,7 +117,18 @@ qqzone-spectator run
 - `qqzone-spectator list-targets`：列出已启用采集目标。
 - `qqzone-spectator crawl-once [--no-push]`：执行一次采集。
 - `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集。
+- `qqzone-spectator export-pdf --target-qq QQ号 [--output 路径] [--limit N] [--no-images]`：导出单目标 PDF。
 - 全局参数：`--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`，默认 `INFO`。
+
+## PDF 导出说明
+
+- 导出模板：A4 纵向时间线卡片，默认按时间倒序。
+- 图片来源：使用 `media.local_path` 本地图片并嵌入 PDF。
+- 依赖要求：首次使用需安装 Chromium：
+
+```bash
+playwright install chromium
+```
 
 ## OneBot 集成说明
 

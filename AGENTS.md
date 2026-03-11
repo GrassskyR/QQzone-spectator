@@ -31,3 +31,8 @@ This project separates responsibilities into small runtime "agents" implemented 
 
 - Module: `src/qqzone_spectator/scheduler.py`
 - Responsibility: orchestrate crawl, persistence, download, and push workflow; supports one-shot and loop mode.
+
+## Export Agent
+
+- Module: `src/qqzone_spectator/exporter/service.py`
+- Responsibility: load stored posts/media for a target QQ and export an A4 timeline PDF with embedded images.

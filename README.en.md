@@ -10,6 +10,7 @@ Language: [简体中文](README.md) | English
 - Enforce strict owner verification and skip posts whose author QQ does not match the target QQ.
 - Persist post text, publish time, and raw payload in SQLite.
 - Download post images to local storage and keep file mappings.
+- Export one target QQ timeline to an A4 PDF with embedded local images.
 - Optionally push new posts through OneBot (recommended stack: NoneBot2 + OneBot v11).
 - Support both one-shot mode and scheduled loop mode.
 
@@ -30,6 +31,8 @@ QQzone-spectator/
       downloader.py
     push/
       onebot.py
+    exporter/
+      service.py
     scheduler.py
     cli.py
   data/
@@ -85,6 +88,12 @@ qqzone-spectator crawl-once
 qqzone-spectator run
 ```
 
+9. Export one target timeline as PDF (A4 template):
+
+```bash
+qqzone-spectator export-pdf --target-qq 1224944928
+```
+
 ## Configuration
 
 Main variables in `.env.example`:
@@ -108,7 +117,18 @@ Main variables in `.env.example`:
 - `qqzone-spectator list-targets`: list enabled target QQ accounts.
 - `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle.
 - `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode.
+- `qqzone-spectator export-pdf --target-qq <qq> [--output path] [--limit N] [--no-images]`: export one target PDF.
 - Global option: `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` (default: `INFO`).
+
+## PDF Export Notes
+
+- Template: A4 portrait timeline cards, latest posts first.
+- Image source: embeds local files from `media.local_path`.
+- One-time setup: install Chromium for Playwright before first export:
+
+```bash
+playwright install chromium
+```
 
 ## OneBot Integration
 

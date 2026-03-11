@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+from datetime import datetime
 from pathlib import Path
 
 from .config import AppConfig
 from .db import Database
+from .exporter import PdfExportService
 from .scheduler import SchedulerService
 
 
@@ -39,6 +41,32 @@ def build_parser() -> argparse.ArgumentParser:
         help="Polling interval in seconds (default from env)",
     )
     run.add_argument("--no-push", action="store_true", help="Disable push actions")
+
+    export_pdf = subparsers.add_parser(
+        "export-pdf",
+        help="Export one target QQ timeline to an A4 PDF",
+    )
+    export_pdf.add_argument(
+        "--target-qq",
+        required=True,
+        help="Target QQ number to export",
+    )
+    export_pdf.add_argument(
+        "--output",
+        default="",
+        help="Output PDF path (default: exports/<target_qq>_<time>.pdf)",
+    )
+    export_pdf.add_argument(
+        "--limit",
+        type=int,
+        default=0,
+        help="Maximum number of posts to export (default: all)",
+    )
+    export_pdf.add_argument(
+        "--no-images",
+        action="store_true",
+        help="Export text only without embedded images",
+    )
 
     return parser
 
@@ -86,6 +114,27 @@ def main() -> None:
                 return
             for target in targets:
                 print(target)
+            return
+
+        if args.command == "export-pdf":
+            output_path = Path(args.output) if args.output else Path("exports") / (
+                f"{args.target_qq}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
+            )
+            exporter = PdfExportService(db=db, project_root=config.project_root)
+            result = exporter.export_target_timeline_pdf(
+                target_qq=str(args.target_qq).strip(),
+                output_path=output_path,
+                include_images=not args.no_images,
+                limit=max(0, int(args.limit)),
+            )
+            print(
+                "exported target={target} posts={posts} embedded_images={images} file={path}".format(
+                    target=result.target_qq,
+                    posts=result.post_count,
+                    images=result.embedded_image_count,
+                    path=result.output_path,
+                )
+            )
             return
 
         require_crawl_config(config)

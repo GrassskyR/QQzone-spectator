@@ -6,7 +6,6 @@ __pycache__/
 .env
 .venv/
 venv/
-qqzone/
 
 build/
 dist/
@@ -14,3 +13,4 @@ dist/
 
 data/*.db
 data/media/
+exports/
