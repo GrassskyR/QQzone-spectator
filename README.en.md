@@ -90,7 +90,7 @@ Use this mode to backfill currently visible historical posts.
 qqzone-spectator run
 ```
 
-Loop mode only processes posts published after the current process starts. If the cookie expires, the loop stops and asks you to update `QZONE_COOKIE`.
+Loop mode uses a fixed startup-second baseline and only processes posts published in that startup second or later. If the cookie expires, the loop stops and asks you to update `QZONE_COOKIE`.
 
 9. Export one target timeline as PDF (A4 template):
 
@@ -112,6 +112,7 @@ Main variables in `.env.example`:
 - `REQUEST_TIMEOUT`: network timeout in seconds.
 - `ONEBOT_BASE_URL`: OneBot HTTP API base URL.
 - `ONEBOT_ACCESS_TOKEN`: OneBot access token (if enabled).
+- `PUSH_ENABLED`: whether push delivery is enabled, default `false`.
 - `PUSH_PRIVATE_USERS`: private push targets, comma-separated.
 - `PUSH_GROUPS`: group push targets, comma-separated.
 
@@ -119,8 +120,8 @@ Main variables in `.env.example`:
 
 - `qqzone-spectator init-db`: initialize schema and sync targets.
 - `qqzone-spectator list-targets`: list enabled target QQ accounts.
-- `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle and backfill visible history.
-- `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode and only process posts published after startup.
+- `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle and backfill visible history; pushes only when `PUSH_ENABLED=true`.
+- `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode and only process posts published in the startup second or later; pushes only when `PUSH_ENABLED=true`.
 - `qqzone-spectator export-pdf --target-qq <qq> [--output path] [--limit N] [--no-images]`: export one target PDF.
 - Global options: `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` and `--env-file PATH`; both can be placed before or after the subcommand.
 
@@ -146,7 +147,7 @@ playwright install chromium
 1. Prepare a QQ bot backend (for example NapCat or go-cqhttp).
 2. Ensure the OneBot HTTP API endpoint is reachable.
 3. Configure `ONEBOT_BASE_URL` and `ONEBOT_ACCESS_TOKEN` (if needed) in `.env`.
-4. Configure push destinations in `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`.
+4. Set `PUSH_ENABLED=true`, then configure push destinations in `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`.
 5. If your OneBot backend lets you choose the HTTP API message format, use `string`; this project sends plain string messages and appends images as CQ codes.
 
 Used OneBot actions:

@@ -68,6 +68,7 @@ def mock_config(tmp_path: Path) -> AppConfig:
         request_timeout=10,
         onebot_base_url="http://127.0.0.1:5700",
         onebot_access_token="test_token",
+        push_enabled=False,
         push_private_users=[111111],
         push_groups=[222222],
     )

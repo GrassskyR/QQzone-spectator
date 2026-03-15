@@ -53,7 +53,11 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[shared_global_options],
         help="Run one crawl cycle",
     )
-    crawl_once.add_argument("--no-push", action="store_true", help="Disable push actions")
+    crawl_once.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Disable push actions even when PUSH_ENABLED=true",
+    )
 
     run = subparsers.add_parser(
         "run",
@@ -66,7 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=0,
         help="Polling interval in seconds (default from env)",
     )
-    run.add_argument("--no-push", action="store_true", help="Disable push actions")
+    run.add_argument(
+        "--no-push",
+        action="store_true",
+        help="Disable push actions even when PUSH_ENABLED=true",
+    )
 
     export_pdf = subparsers.add_parser(
         "export-pdf",
@@ -166,9 +174,10 @@ def main() -> None:
 
         require_crawl_config(config)
         service = SchedulerService.from_config(config, db)
+        push_enabled = config.push_enabled and not getattr(args, "no_push", False)
 
         if args.command == "crawl-once":
-            result = service.crawl_once(push_enabled=not args.no_push)
+            result = service.crawl_once(push_enabled=push_enabled)
             print(
                 "fetched={fetched} inserted={inserted} skipped_owner_mismatch={skipped}".format(
                     fetched=result["fetched"],
@@ -180,7 +189,7 @@ def main() -> None:
 
         if args.command == "run":
             interval = args.interval if args.interval > 0 else config.poll_interval_seconds
-            service.run_loop(interval, push_enabled=not args.no_push)
+            service.run_loop(interval, push_enabled=push_enabled)
             return
 
         parser.print_help()

@@ -18,6 +18,7 @@ def _make_config(
     uin: str = "123456",
     cookie: str = "uin=o123456; p_skey=abc;",
     poll_interval_seconds: int = 300,
+    push_enabled: bool = False,
 ) -> AppConfig:
     return AppConfig(
         project_root=tmp_path,
@@ -31,6 +32,7 @@ def _make_config(
         request_timeout=10,
         onebot_base_url="http://127.0.0.1:5700",
         onebot_access_token="token",
+        push_enabled=push_enabled,
         push_private_users=[111],
         push_groups=[222],
     )
@@ -101,6 +103,7 @@ class TestRequireCrawlConfig:
             qzone_uin=uin, qzone_cookie=cookie, target_qqs=[],
             fetch_limit=1, poll_interval_seconds=30, request_timeout=5,
             onebot_base_url="", onebot_access_token="",
+            push_enabled=False,
             push_private_users=[], push_groups=[],
         )
 
@@ -265,7 +268,7 @@ class TestMain:
         ):
             main()
 
-        mock_service.run_loop.assert_called_once_with(900, push_enabled=True)
+        mock_service.run_loop.assert_called_once_with(900, push_enabled=False)
         mock_db.close.assert_called_once_with()
 
     def test_run_accepts_global_option_after_subcommand(
@@ -290,5 +293,26 @@ class TestMain:
         ):
             main()
 
-        mock_service.run_loop.assert_called_once_with(15, push_enabled=True)
+        mock_service.run_loop.assert_called_once_with(15, push_enabled=False)
+        mock_db.close.assert_called_once_with()
+
+    def test_run_uses_env_push_toggle_when_enabled(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        config = _make_config(tmp_path, poll_interval_seconds=900, push_enabled=True)
+        mock_db = MagicMock()
+        mock_service = MagicMock()
+
+        monkeypatch.setattr(sys, "argv", ["qqzone-spectator", "run"])
+
+        with (
+            patch("qqzone_spectator.cli.AppConfig.from_env", return_value=config),
+            patch("qqzone_spectator.cli.Database", return_value=mock_db),
+            patch("qqzone_spectator.cli.SchedulerService.from_config", return_value=mock_service),
+        ):
+            main()
+
+        mock_service.run_loop.assert_called_once_with(900, push_enabled=True)
         mock_db.close.assert_called_once_with()

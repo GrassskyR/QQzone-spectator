@@ -90,7 +90,7 @@ qqzone-spectator crawl-once
 qqzone-spectator run
 ```
 
-循环模式只处理本次程序启动后新发布的动态；若 Cookie 失效，循环会停止并提示更新 `QZONE_COOKIE`。
+循环模式使用进程启动时的固定秒级时间基线，只处理该启动秒及之后发布的动态；若 Cookie 失效，循环会停止并提示更新 `QZONE_COOKIE`。
 
 9. 导出单目标动态为 PDF（A4 时间线模板）：
 
@@ -112,6 +112,7 @@ qqzone-spectator export-pdf --target-qq 1224944928
 - `REQUEST_TIMEOUT`：网络请求超时时间（秒）。
 - `ONEBOT_BASE_URL`：OneBot HTTP API 地址。
 - `ONEBOT_ACCESS_TOKEN`：OneBot 鉴权 Token（若启用）。
+- `PUSH_ENABLED`：是否启用推送，默认 `false`。
 - `PUSH_PRIVATE_USERS`：私聊推送目标 QQ，逗号分隔。
 - `PUSH_GROUPS`：群推送目标群号，逗号分隔。
 
@@ -119,8 +120,8 @@ qqzone-spectator export-pdf --target-qq 1224944928
 
 - `qqzone-spectator init-db`：初始化数据库并同步目标账号。
 - `qqzone-spectator list-targets`：列出已启用采集目标。
-- `qqzone-spectator crawl-once [--no-push]`：执行一次采集，可用于补抓历史动态。
-- `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集，只处理本次启动后新发布的动态。
+- `qqzone-spectator crawl-once [--no-push]`：执行一次采集，可用于补抓历史动态；仅当 `PUSH_ENABLED=true` 时才会推送。
+- `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集，只处理本次启动秒及之后新发布的动态；仅当 `PUSH_ENABLED=true` 时才会推送。
 - `qqzone-spectator export-pdf --target-qq QQ号 [--output 路径] [--limit N] [--no-images]`：导出单目标 PDF。
 - 全局参数：`--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`、`--env-file PATH`；可写在子命令前后。
 
@@ -146,7 +147,7 @@ playwright install chromium
 1. 准备 QQ 机器人协议端（如 NapCat 或 go-cqhttp）。
 2. 确保 OneBot HTTP API 可访问。
 3. 在 `.env` 配置 `ONEBOT_BASE_URL`、`ONEBOT_ACCESS_TOKEN`（如有）。
-4. 配置推送目标 `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`。
+4. 将 `PUSH_ENABLED=true`，并配置推送目标 `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`。
 5. 若 OneBot 后端可配置 HTTP API 消息格式，请选择 `string`；本项目发送的是字符串消息，并使用 CQ 码拼接图片内容。
 
 项目会调用以下 OneBot 动作：

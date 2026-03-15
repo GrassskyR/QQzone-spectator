@@ -49,6 +49,7 @@ def _make_service(
     *,
     targets: list[str] | None = None,
     onebot: OneBotClient | None = None,
+    push_enabled: bool = False,
 ) -> tuple[SchedulerService, Database, MagicMock, MagicMock]:
     """Create a SchedulerService with mocked QzoneClient and MediaDownloader."""
     db = Database(tmp_path / "test.db")
@@ -68,6 +69,7 @@ def _make_service(
         fetch_limit=20, poll_interval_seconds=300, request_timeout=10,
         onebot_base_url="http://127.0.0.1:5700" if onebot else "",
         onebot_access_token="",
+        push_enabled=push_enabled,
         push_private_users=[111] if onebot else [],
         push_groups=[222] if onebot else [],
     )
@@ -150,10 +152,10 @@ class TestCrawlOnce:
 
     def test_run_mode_skips_posts_published_before_session_start(self, tmp_path: Path):
         svc, db, mock_qzone, mock_dl = _make_service(tmp_path, targets=["123"])
-        cutoff = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
+        cutoff = int(datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp())
         mock_qzone.fetch_posts.return_value = [
-            _make_raw_post("old", created_time=int((cutoff - timedelta(seconds=30)).timestamp())),
-            _make_raw_post("new", created_time=int((cutoff + timedelta(seconds=30)).timestamp())),
+            _make_raw_post("old", created_time=cutoff - 30),
+            _make_raw_post("new", created_time=cutoff + 30),
         ]
         mock_dl.download_image.return_value = None
 
@@ -164,6 +166,22 @@ class TestCrawlOnce:
         assert result["skipped_before_start"] == 1
         rows = db.conn.execute("SELECT post_id FROM posts ORDER BY id").fetchall()
         assert [row["post_id"] for row in rows] == ["new"]
+
+    def test_run_mode_accepts_posts_published_in_same_second(self, tmp_path: Path):
+        svc, db, mock_qzone, mock_dl = _make_service(tmp_path, targets=["123"])
+        cutoff = int(datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc).timestamp())
+        mock_qzone.fetch_posts.return_value = [
+            _make_raw_post("same-second", created_time=cutoff),
+            _make_raw_post("older", created_time=cutoff - 1),
+        ]
+        mock_dl.download_image.return_value = None
+
+        result = svc.crawl_once(push_enabled=False, published_after=cutoff)
+
+        assert result["inserted"] == 1
+        assert result["skipped_before_start"] == 1
+        rows = db.conn.execute("SELECT post_id FROM posts ORDER BY id").fetchall()
+        assert [row["post_id"] for row in rows] == ["same-second"]
 
 
 class TestFromConfig:
@@ -182,6 +200,7 @@ class TestFromConfig:
             request_timeout=10,
             onebot_base_url="http://127.0.0.1:5700",
             onebot_access_token="token",
+            push_enabled=True,
             push_private_users=[111],
             push_groups=[],
         )
@@ -202,6 +221,36 @@ class TestFromConfig:
         )
         assert svc.onebot_client is mock_onebot_cls.return_value
 
+    def test_skips_onebot_client_when_push_is_disabled(self, tmp_path: Path):
+        db = Database(tmp_path / "test.db")
+        db.init_schema()
+        config = AppConfig(
+            project_root=tmp_path,
+            db_path=tmp_path / "test.db",
+            media_dir=tmp_path / "media",
+            qzone_uin="100",
+            qzone_cookie="p_skey=abc;",
+            target_qqs=["123"],
+            fetch_limit=20,
+            poll_interval_seconds=300,
+            request_timeout=10,
+            onebot_base_url="http://127.0.0.1:5700",
+            onebot_access_token="token",
+            push_enabled=False,
+            push_private_users=[111],
+            push_groups=[],
+        )
+
+        with (
+            patch("qqzone_spectator.scheduler.QzoneClient"),
+            patch("qqzone_spectator.scheduler.MediaDownloader"),
+            patch("qqzone_spectator.scheduler.OneBotClient") as mock_onebot_cls,
+        ):
+            svc = SchedulerService.from_config(config, db)
+
+        mock_onebot_cls.assert_not_called()
+        assert svc.onebot_client is None
+
     def test_skips_onebot_client_without_push_targets(self, tmp_path: Path):
         db = Database(tmp_path / "test.db")
         db.init_schema()
@@ -217,6 +266,7 @@ class TestFromConfig:
             request_timeout=10,
             onebot_base_url="http://127.0.0.1:5700",
             onebot_access_token="token",
+            push_enabled=False,
             push_private_users=[],
             push_groups=[],
         )
@@ -402,6 +452,29 @@ class TestRunLoop:
         ):
             svc.run_loop(5)
 
+        mock_sleep.assert_called_once_with(5)
+
+    def test_reuses_fixed_startup_second_for_each_cycle(self, tmp_path: Path):
+        svc, _, _, _ = _make_service(tmp_path, targets=["123"])
+        svc.crawl_once = MagicMock(
+            side_effect=[
+                {"fetched": 1, "inserted": 1, "skipped_before_start": 0, "skipped_owner_mismatch": 0},
+                KeyboardInterrupt(),
+            ]
+        )
+        started_at = datetime(2026, 3, 15, 17, 10, 26, 987654, tzinfo=timezone.utc)
+
+        with (
+            patch("qqzone_spectator.scheduler.datetime") as mock_datetime,
+            patch("qqzone_spectator.scheduler.time.sleep") as mock_sleep,
+            pytest.raises(KeyboardInterrupt),
+        ):
+            mock_datetime.now.return_value = started_at
+            svc.run_loop(5)
+
+        expected_cutoff = int(started_at.timestamp())
+        assert svc.crawl_once.call_args_list[0].kwargs["published_after"] == expected_cutoff
+        assert svc.crawl_once.call_args_list[1].kwargs["published_after"] == expected_cutoff
         mock_sleep.assert_called_once_with(5)
 
     def test_continues_after_cycle_failure(self, tmp_path: Path):

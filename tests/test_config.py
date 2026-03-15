@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from qqzone_spectator.config import AppConfig, _parse_csv, _parse_csv_int
+from qqzone_spectator.config import AppConfig, _parse_bool, _parse_csv, _parse_csv_int
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,19 @@ class TestParseCsvInt:
         assert _parse_csv_int("") == []
 
 
+class TestParseBool:
+    def test_true_values(self):
+        for value in ("1", "true", "yes", "on", "TRUE"):
+            assert _parse_bool(value) is True
+
+    def test_false_values(self):
+        for value in ("0", "false", "no", "off", "FALSE"):
+            assert _parse_bool(value, default=True) is False
+
+    def test_invalid_uses_default(self):
+        assert _parse_bool("maybe", default=True) is True
+
+
 # ---------------------------------------------------------------------------
 # AppConfig.from_env
 # ---------------------------------------------------------------------------
@@ -58,6 +71,7 @@ class TestAppConfig:
         monkeypatch.setenv("REQUEST_TIMEOUT", "15")
         monkeypatch.setenv("ONEBOT_BASE_URL", "http://localhost:5700/")
         monkeypatch.setenv("ONEBOT_ACCESS_TOKEN", "tok")
+        monkeypatch.setenv("PUSH_ENABLED", "true")
         monkeypatch.setenv("PUSH_PRIVATE_USERS", "333")
         monkeypatch.setenv("PUSH_GROUPS", "444,555")
 
@@ -71,8 +85,18 @@ class TestAppConfig:
         assert cfg.request_timeout == 15
         assert cfg.onebot_base_url == "http://localhost:5700"
         assert cfg.onebot_access_token == "tok"
+        assert cfg.push_enabled is True
         assert cfg.push_private_users == [333]
         assert cfg.push_groups == [444, 555]
+
+    def test_push_enabled_defaults_false(self, monkeypatch):
+        monkeypatch.setenv("QZONE_UIN", "1")
+        monkeypatch.setenv("QZONE_COOKIE", "x")
+        monkeypatch.delenv("PUSH_ENABLED", raising=False)
+
+        cfg = AppConfig.from_env(env_file=None)
+
+        assert cfg.push_enabled is False
 
     def test_fetch_limit_minimum(self, monkeypatch):
         monkeypatch.setenv("FETCH_LIMIT", "0")
@@ -103,6 +127,7 @@ class TestAppConfig:
             qzone_uin="1", qzone_cookie="x", target_qqs=[],
             fetch_limit=20, poll_interval_seconds=300, request_timeout=20,
             onebot_base_url="", onebot_access_token="",
+            push_enabled=False,
             push_private_users=[], push_groups=[],
         )
         cfg.ensure_directories()
