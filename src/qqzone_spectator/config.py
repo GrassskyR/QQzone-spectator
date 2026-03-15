@@ -26,6 +26,17 @@ def _parse_csv_int(value: str) -> list[int]:
     return result
 
 
+def _parse_bool(value: str, *, default: bool = False) -> bool:
+    text = value.strip().lower()
+    if not text:
+        return default
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
 @dataclass(slots=True)
 class AppConfig:
     project_root: Path
@@ -42,6 +53,7 @@ class AppConfig:
 
     onebot_base_url: str
     onebot_access_token: str
+    push_enabled: bool
     push_private_users: list[int]
     push_groups: list[int]
 
@@ -70,6 +82,7 @@ class AppConfig:
             request_timeout=max(5, int(os.getenv("REQUEST_TIMEOUT", "20"))),
             onebot_base_url=os.getenv("ONEBOT_BASE_URL", "").strip().rstrip("/"),
             onebot_access_token=os.getenv("ONEBOT_ACCESS_TOKEN", "").strip(),
+            push_enabled=_parse_bool(os.getenv("PUSH_ENABLED", "false"), default=False),
             push_private_users=_parse_csv_int(os.getenv("PUSH_PRIVATE_USERS", "")),
             push_groups=_parse_csv_int(os.getenv("PUSH_GROUPS", "")),
         )

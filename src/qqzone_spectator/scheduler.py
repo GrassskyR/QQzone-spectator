@@ -22,7 +22,7 @@ def build_content_preview(content: str, max_length: int = 60) -> str:
     return f"{normalized[: max_length - 3]}..."
 
 
-def parse_post_created_at(created_at: str) -> datetime | None:
+def parse_post_created_at_seconds(created_at: str) -> int | None:
     text = created_at.strip()
     if not text:
         return None
@@ -34,7 +34,7 @@ def parse_post_created_at(created_at: str) -> datetime | None:
 
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+    return int(value.astimezone(timezone.utc).timestamp())
 
 
 class SchedulerService:
@@ -63,7 +63,11 @@ class SchedulerService:
         downloader = MediaDownloader(config.media_dir)
 
         onebot_client: OneBotClient | None = None
-        if config.onebot_base_url and (config.push_private_users or config.push_groups):
+        if (
+            config.push_enabled
+            and config.onebot_base_url
+            and (config.push_private_users or config.push_groups)
+        ):
             onebot_client = OneBotClient(
                 config.onebot_base_url,
                 access_token=config.onebot_access_token,
@@ -81,8 +85,8 @@ class SchedulerService:
     def crawl_once(
         self,
         *,
-        push_enabled: bool = True,
-        published_after: datetime | None = None,
+        push_enabled: bool = False,
+        published_after: int | None = None,
     ) -> dict[str, int]:
         targets = self.db.list_targets()
         if not targets:
@@ -100,7 +104,7 @@ class SchedulerService:
         inserted_posts = 0
         skipped_owner_mismatch = 0
         skipped_before_start = 0
-        cutoff = published_after.astimezone(timezone.utc) if published_after else None
+        cutoff = published_after
 
         try:
             for target_qq in targets:
@@ -113,15 +117,16 @@ class SchedulerService:
 
                 for index, post in enumerate(posts, start=1):
                     if cutoff is not None:
-                        created_at = parse_post_created_at(post.created_at)
-                        if created_at is None or created_at <= cutoff:
+                        created_at = parse_post_created_at_seconds(post.created_at)
+                        if created_at is None or created_at < cutoff:
                             skipped_before_start += 1
                             LOGGER.debug(
-                                "POST_BEFORE_START_SKIP qq=%s post=%s created_at=%s cutoff=%s",
+                                "POST_BEFORE_START_SKIP qq=%s post=%s created_at=%s created_at_seconds=%s cutoff_seconds=%s",
                                 post.target_qq,
                                 post.post_id,
                                 post.created_at,
-                                cutoff.isoformat(),
+                                created_at,
+                                cutoff,
                             )
                             continue
 
@@ -206,20 +211,22 @@ class SchedulerService:
             )
             raise
 
-    def run_loop(self, interval_seconds: int, *, push_enabled: bool = True) -> None:
+    def run_loop(self, interval_seconds: int, *, push_enabled: bool = False) -> None:
         session_started_at = datetime.now(timezone.utc)
+        session_started_at_seconds = int(session_started_at.timestamp())
         LOGGER.info(
-            "RUN_LOOP_START interval=%s push_enabled=%s session_started_at=%s",
+            "RUN_LOOP_START interval=%s push_enabled=%s session_started_at=%s session_started_at_seconds=%s",
             interval_seconds,
             push_enabled,
             session_started_at.isoformat(),
+            session_started_at_seconds,
         )
 
         while True:
             try:
                 result = self.crawl_once(
                     push_enabled=push_enabled,
-                    published_after=session_started_at,
+                    published_after=session_started_at_seconds,
                 )
                 LOGGER.info(
                     "crawl done: fetched=%s inserted=%s skipped_before_start=%s skipped_owner_mismatch=%s",
