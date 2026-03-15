@@ -105,6 +105,7 @@ qqzone-spectator export-pdf --target-qq 1224944928
 - `QZONE_UIN`：你的 QQ 号（用于请求参数）。
 - `QZONE_COOKIE`：登录后的完整 Cookie，至少包含 `p_skey` 或 `skey`。
 - `TARGET_QQS`：要采集的目标 QQ，多个用逗号分隔。
+- `PROJECT_ROOT`：项目根目录，默认当前仓库根目录。
 - `DB_PATH`：SQLite 文件路径，默认 `data/qqzone.db`。
 - `MEDIA_DIR`：图片下载目录，默认 `data/media`。
 - `FETCH_LIMIT`：每次请求的动态条数。
