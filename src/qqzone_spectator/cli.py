@@ -11,29 +11,55 @@ from .exporter import PdfExportService
 from .scheduler import SchedulerService
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="QQZone spectator")
+def build_global_options_parser(*, include_defaults: bool) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument(
         "--env-file",
-        default=".env",
+        default=".env" if include_defaults else argparse.SUPPRESS,
         help="Path to .env file (default: .env)",
     )
     parser.add_argument(
         "--log-level",
-        default="INFO",
+        default="INFO" if include_defaults else argparse.SUPPRESS,
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
         help="Logging level (default: INFO)",
+    )
+    return parser
+
+
+def build_parser() -> argparse.ArgumentParser:
+    global_options = build_global_options_parser(include_defaults=True)
+    shared_global_options = build_global_options_parser(include_defaults=False)
+    parser = argparse.ArgumentParser(
+        description="QQZone spectator",
+        parents=[global_options],
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    subparsers.add_parser("init-db", help="Create database schema and sync targets")
-    subparsers.add_parser("list-targets", help="List enabled target QQ accounts")
+    subparsers.add_parser(
+        "init-db",
+        parents=[shared_global_options],
+        help="Create database schema and sync targets",
+    )
+    subparsers.add_parser(
+        "list-targets",
+        parents=[shared_global_options],
+        help="List enabled target QQ accounts",
+    )
 
-    crawl_once = subparsers.add_parser("crawl-once", help="Run one crawl cycle")
+    crawl_once = subparsers.add_parser(
+        "crawl-once",
+        parents=[shared_global_options],
+        help="Run one crawl cycle",
+    )
     crawl_once.add_argument("--no-push", action="store_true", help="Disable push actions")
 
-    run = subparsers.add_parser("run", help="Run in loop mode")
+    run = subparsers.add_parser(
+        "run",
+        parents=[shared_global_options],
+        help="Run in loop mode",
+    )
     run.add_argument(
         "--interval",
         type=int,
@@ -44,6 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     export_pdf = subparsers.add_parser(
         "export-pdf",
+        parents=[shared_global_options],
         help="Export one target QQ timeline to an A4 PDF",
     )
     export_pdf.add_argument(

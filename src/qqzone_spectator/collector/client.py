@@ -28,6 +28,10 @@ class QzoneAPIError(RuntimeError):
         super().__init__(f"QZone API error code={code}: {message}")
 
 
+class QzoneAuthError(QzoneAPIError):
+    pass
+
+
 def hash33(token: str) -> int:
     value = 5381
     for ch in token:
@@ -79,8 +83,10 @@ class QzoneClient:
                 try:
                     payload = self._fetch_page(target_qq, pos=current_pos, num=request_num)
                     break
+                except QzoneAuthError:
+                    raise
                 except QzoneAPIError as exc:
-                    is_retryable = exc.code in {-10000, -3000, -4000, -5000}
+                    is_retryable = exc.code in {-10000, -4000, -5000}
                     if not is_retryable:
                         raise
 
@@ -220,7 +226,10 @@ class QzoneClient:
         code = payload.get("code", 0)
         if code not in (0, None):
             message = payload.get("message") or payload.get("msg") or "unknown error"
-            raise QzoneAPIError(self._safe_int(code), str(message))
+            normalized_code = self._safe_int(code)
+            if normalized_code == -3000:
+                raise QzoneAuthError(normalized_code, str(message))
+            raise QzoneAPIError(normalized_code, str(message))
 
         return payload
 

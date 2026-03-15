@@ -29,6 +29,7 @@ class TestQzonePost:
             source_payload="{}",
         )
         assert post.media == []
+        assert post.author_name == ""
         assert post.target_qq == "123"
         assert post.content == "hello"
 

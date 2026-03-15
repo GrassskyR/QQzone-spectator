@@ -2,15 +2,12 @@
 from __future__ import annotations
 
 import json
+import sqlite3
+from pathlib import Path
 
 import pytest
 
-from qqzone_spectator.db import (
-    Database,
-    _extract_author_from_user_info,
-    _extract_author_qq_from_payload,
-    _normalize_qq,
-)
+from qqzone_spectator.db import Database
 from qqzone_spectator.models import MediaItem, QzonePost
 
 
@@ -29,6 +26,36 @@ class TestSchema:
         assert "targets" in names
         assert "crawl_runs" in names
         assert "push_records" in names
+
+    def test_posts_table_has_author_name_column(self, tmp_db: Database):
+        columns = tmp_db.conn.execute("PRAGMA table_info(posts)").fetchall()
+        names = {row["name"] for row in columns}
+        assert "author_name" in names
+
+    def test_outdated_posts_schema_raises_clear_error(self, tmp_path: Path):
+        db_path = tmp_path / "legacy.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """
+            CREATE TABLE posts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                target_qq TEXT NOT NULL,
+                author_qq TEXT NOT NULL DEFAULT '',
+                post_id TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                source_payload TEXT NOT NULL,
+                inserted_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        db = Database(db_path)
+        with pytest.raises(RuntimeError, match="outdated"):
+            db.init_schema()
+        db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -101,7 +128,13 @@ class TestCrawlRuns:
 # ---------------------------------------------------------------------------
 
 class TestSavePost:
-    def _make_post(self, target_qq="123", post_id="tid_1", author_qq="123") -> QzonePost:
+    def _make_post(
+        self,
+        target_qq="123",
+        post_id="tid_1",
+        author_qq="123",
+        author_name="Tester",
+    ) -> QzonePost:
         return QzonePost(
             target_qq=target_qq,
             author_qq=author_qq,
@@ -109,6 +142,7 @@ class TestSavePost:
             content="test",
             created_at="2025-01-01T00:00:00+00:00",
             source_payload=json.dumps({"tid": post_id, "uin": int(author_qq)}),
+            author_name=author_name,
             media=[MediaItem(url="https://example.com/1.jpg")],
         )
 
@@ -118,6 +152,7 @@ class TestSavePost:
         row = tmp_db.conn.execute("SELECT * FROM posts WHERE post_id = 'tid_1'").fetchone()
         assert row is not None
         assert row["content"] == "test"
+        assert row["author_name"] == "Tester"
 
     def test_save_post_duplicate(self, tmp_db: Database):
         post = self._make_post()
@@ -236,40 +271,3 @@ class TestPurgeOwnerMismatch:
         assert tmp_db.conn.execute("SELECT COUNT(*) AS c FROM media").fetchone()["c"] == 0
         assert tmp_db.conn.execute("SELECT COUNT(*) AS c FROM push_records").fetchone()["c"] == 0
 
-
-# ---------------------------------------------------------------------------
-# Helper functions in db.py
-# ---------------------------------------------------------------------------
-
-class TestDbHelpers:
-    def test_extract_author_qq_from_payload(self):
-        payload = json.dumps({"uin": 12345})
-        assert _extract_author_qq_from_payload(payload) == "12345"
-
-    def test_extract_author_qq_from_payload_invalid_json(self):
-        assert _extract_author_qq_from_payload("not json") == ""
-
-    def test_extract_author_qq_from_payload_user_info(self):
-        payload = json.dumps({"userinfo": {"uin": 99999}})
-        assert _extract_author_qq_from_payload(payload) == "99999"
-
-    def test_normalize_qq_int(self):
-        assert _normalize_qq(12345) == "12345"
-
-    def test_normalize_qq_negative(self):
-        assert _normalize_qq(-1) == ""
-
-    def test_normalize_qq_string(self):
-        assert _normalize_qq("54321") == "54321"
-
-    def test_normalize_qq_none(self):
-        assert _normalize_qq(None) == ""
-
-    def test_extract_author_from_user_info_dict(self):
-        assert _extract_author_from_user_info({"uin": 111}) == "111"
-
-    def test_extract_author_from_user_info_list(self):
-        assert _extract_author_from_user_info([{"uin": 222}]) == "222"
-
-    def test_extract_author_from_user_info_none(self):
-        assert _extract_author_from_user_info(None) == ""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -48,18 +49,33 @@ class OneBotClient:
         return result
 
 
+def format_post_created_at(created_at: str) -> str:
+    text = created_at.strip()
+    if not text:
+        return ""
+
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return text
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
 def build_post_message(post: QzonePost, media_paths: list[str]) -> str:
     text = post.content.strip() if post.content.strip() else "(no text content)"
     lines = [
-        f"[QQZone] target={post.target_qq}",
-        f"post={post.post_id}",
-        f"time={post.created_at}",
+        post.author_qq.strip() or post.target_qq.strip(),
+        post.author_name.strip(),
+        format_post_created_at(post.created_at),
         text,
     ]
-    message = "\n".join(lines)
 
     if media_paths:
-        images = "".join(f"[CQ:image,file={Path(path).resolve().as_uri()}]" for path in media_paths)
-        message = f"{message}\n{images}"
+        lines.extend(
+            f"[CQ:image,file={Path(path).resolve().as_uri()}]" for path in media_paths
+        )
 
-    return message
+    return "\n".join(lines)

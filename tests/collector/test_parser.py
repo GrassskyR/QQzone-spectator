@@ -14,6 +14,7 @@ from qqzone_spectator.collector.parser import (
     _extract_media_url,
     _extract_post_id,
     _normalize_time,
+    extract_author_name,
     extract_author_qq,
     parse_posts,
 )
@@ -31,6 +32,7 @@ class TestParsePosts:
         assert isinstance(posts[0], QzonePost)
         assert posts[0].target_qq == "123456"
         assert posts[0].post_id == "tid_001"
+        assert posts[0].author_name == "Tester"
         assert posts[0].content == "Hello QZone"
 
     def test_sorted_by_time(self):
@@ -65,6 +67,18 @@ class TestExtractAuthorQQ:
 
     def test_fallback_default(self):
         assert extract_author_qq({}, default_target_qq="77777") == "77777"
+
+
+class TestExtractAuthorName:
+    def test_top_level_name(self):
+        assert extract_author_name({"name": "Tester"}) == "Tester"
+
+    def test_nested_user_info_name(self):
+        raw = {"userinfo": {"nickname": "Nested Tester"}}
+        assert extract_author_name(raw) == "Nested Tester"
+
+    def test_missing_name(self):
+        assert extract_author_name({}) == ""
 
 
 # ---------------------------------------------------------------------------

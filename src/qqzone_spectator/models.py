@@ -18,4 +18,5 @@ class QzonePost:
     content: str
     created_at: str
     source_payload: str
+    author_name: str = ""
     media: list[MediaItem] = field(default_factory=list)

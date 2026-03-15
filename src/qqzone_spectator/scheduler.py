@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import logging
 import time
+from datetime import datetime, timezone
 
-from .collector import MediaDownloader, QzoneClient, parse_posts
+from .collector import MediaDownloader, QzoneAuthError, QzoneClient, parse_posts
 from .config import AppConfig
 from .db import Database
 from .models import QzonePost
@@ -19,6 +20,21 @@ def build_content_preview(content: str, max_length: int = 60) -> str:
     if len(normalized) <= max_length:
         return normalized
     return f"{normalized[: max_length - 3]}..."
+
+
+def parse_post_created_at(created_at: str) -> datetime | None:
+    text = created_at.strip()
+    if not text:
+        return None
+
+    try:
+        value = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class SchedulerService:
@@ -62,7 +78,12 @@ class SchedulerService:
             onebot_client=onebot_client,
         )
 
-    def crawl_once(self, *, push_enabled: bool = True) -> dict[str, int]:
+    def crawl_once(
+        self,
+        *,
+        push_enabled: bool = True,
+        published_after: datetime | None = None,
+    ) -> dict[str, int]:
         targets = self.db.list_targets()
         if not targets:
             raise RuntimeError("No target QQ found. Set TARGET_QQS and run init-db first.")
@@ -78,6 +99,8 @@ class SchedulerService:
         fetched_posts = 0
         inserted_posts = 0
         skipped_owner_mismatch = 0
+        skipped_before_start = 0
+        cutoff = published_after.astimezone(timezone.utc) if published_after else None
 
         try:
             for target_qq in targets:
@@ -89,6 +112,19 @@ class SchedulerService:
                 LOGGER.info("TARGET_FETCHED qq=%s posts=%s", target_qq, len(posts))
 
                 for index, post in enumerate(posts, start=1):
+                    if cutoff is not None:
+                        created_at = parse_post_created_at(post.created_at)
+                        if created_at is None or created_at <= cutoff:
+                            skipped_before_start += 1
+                            LOGGER.debug(
+                                "POST_BEFORE_START_SKIP qq=%s post=%s created_at=%s cutoff=%s",
+                                post.target_qq,
+                                post.post_id,
+                                post.created_at,
+                                cutoff.isoformat(),
+                            )
+                            continue
+
                     if post.author_qq and post.author_qq != post.target_qq:
                         skipped_owner_mismatch += 1
                         LOGGER.info(
@@ -138,15 +174,17 @@ class SchedulerService:
             )
 
             LOGGER.info(
-                "CRAWL_DONE run_id=%s fetched=%s inserted=%s skipped_owner_mismatch=%s",
+                "CRAWL_DONE run_id=%s fetched=%s inserted=%s skipped_before_start=%s skipped_owner_mismatch=%s",
                 run_id,
                 fetched_posts,
                 inserted_posts,
+                skipped_before_start,
                 skipped_owner_mismatch,
             )
             return {
                 "fetched": fetched_posts,
                 "inserted": inserted_posts,
+                "skipped_before_start": skipped_before_start,
                 "skipped_owner_mismatch": skipped_owner_mismatch,
             }
         except Exception as exc:
@@ -158,25 +196,44 @@ class SchedulerService:
                 error_message=str(exc),
             )
             LOGGER.error(
-                "CRAWL_FAILED run_id=%s fetched=%s inserted=%s skipped_owner_mismatch=%s error=%s",
+                "CRAWL_FAILED run_id=%s fetched=%s inserted=%s skipped_before_start=%s skipped_owner_mismatch=%s error=%s",
                 run_id,
                 fetched_posts,
                 inserted_posts,
+                skipped_before_start,
                 skipped_owner_mismatch,
                 exc,
             )
             raise
 
     def run_loop(self, interval_seconds: int, *, push_enabled: bool = True) -> None:
+        session_started_at = datetime.now(timezone.utc)
+        LOGGER.info(
+            "RUN_LOOP_START interval=%s push_enabled=%s session_started_at=%s",
+            interval_seconds,
+            push_enabled,
+            session_started_at.isoformat(),
+        )
+
         while True:
             try:
-                result = self.crawl_once(push_enabled=push_enabled)
+                result = self.crawl_once(
+                    push_enabled=push_enabled,
+                    published_after=session_started_at,
+                )
                 LOGGER.info(
-                    "crawl done: fetched=%s inserted=%s skipped_owner_mismatch=%s",
+                    "crawl done: fetched=%s inserted=%s skipped_before_start=%s skipped_owner_mismatch=%s",
                     result["fetched"],
                     result["inserted"],
+                    result.get("skipped_before_start", 0),
                     result.get("skipped_owner_mismatch", 0),
                 )
+            except QzoneAuthError as exc:
+                LOGGER.error(
+                    "crawl loop stopped: QZONE_COOKIE may be expired. Update QZONE_COOKIE and rerun. detail=%s",
+                    exc.message,
+                )
+                return
             except Exception:
                 LOGGER.exception("crawl cycle failed")
 

@@ -82,11 +82,15 @@ qqzone-spectator list-targets
 qqzone-spectator crawl-once
 ```
 
+Use this mode to backfill currently visible historical posts.
+
 8. Run continuously (interval from `.env` by default):
 
 ```bash
 qqzone-spectator run
 ```
+
+Loop mode only processes posts published after the current process starts. If the cookie expires, the loop stops and asks you to update `QZONE_COOKIE`.
 
 9. Export one target timeline as PDF (A4 template):
 
@@ -115,10 +119,17 @@ Main variables in `.env.example`:
 
 - `qqzone-spectator init-db`: initialize schema and sync targets.
 - `qqzone-spectator list-targets`: list enabled target QQ accounts.
-- `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle.
-- `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode.
+- `qqzone-spectator crawl-once [--no-push]`: run one crawl cycle and backfill visible history.
+- `qqzone-spectator run [--interval SECONDS] [--no-push]`: run in loop mode and only process posts published after startup.
 - `qqzone-spectator export-pdf --target-qq <qq> [--output path] [--limit N] [--no-images]`: export one target PDF.
-- Global option: `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` (default: `INFO`).
+- Global options: `--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}` and `--env-file PATH`; both can be placed before or after the subcommand.
+
+Examples:
+
+```bash
+qqzone-spectator run --interval 15 --log-level INFO
+qqzone-spectator --env-file .env.test crawl-once --no-push
+```
 
 ## PDF Export Notes
 
@@ -136,6 +147,7 @@ playwright install chromium
 2. Ensure the OneBot HTTP API endpoint is reachable.
 3. Configure `ONEBOT_BASE_URL` and `ONEBOT_ACCESS_TOKEN` (if needed) in `.env`.
 4. Configure push destinations in `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`.
+5. If your OneBot backend lets you choose the HTTP API message format, use `string`; this project sends plain string messages and appends images as CQ codes.
 
 Used OneBot actions:
 
@@ -157,4 +169,5 @@ Default storage is SQLite. Main tables:
 - QQZone collection depends on cookies and unofficial interfaces, with potential risk of expiration or anti-abuse restrictions.
 - Only collect content that your account is authorized to access.
 - Use a reasonable polling interval to avoid overly frequent requests.
+- If you are upgrading from an earlier test build, delete the old SQLite file and run `qqzone-spectator init-db` again.
 - This project is for learning and research purposes. Please comply with platform rules and applicable laws.

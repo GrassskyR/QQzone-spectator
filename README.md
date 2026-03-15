@@ -82,11 +82,15 @@ qqzone-spectator list-targets
 qqzone-spectator crawl-once
 ```
 
+用于补抓当前可见范围内的历史动态。
+
 8. 启动循环采集（间隔默认读取 `.env`）：
 
 ```bash
 qqzone-spectator run
 ```
+
+循环模式只处理本次程序启动后新发布的动态；若 Cookie 失效，循环会停止并提示更新 `QZONE_COOKIE`。
 
 9. 导出单目标动态为 PDF（A4 时间线模板）：
 
@@ -115,10 +119,17 @@ qqzone-spectator export-pdf --target-qq 1224944928
 
 - `qqzone-spectator init-db`：初始化数据库并同步目标账号。
 - `qqzone-spectator list-targets`：列出已启用采集目标。
-- `qqzone-spectator crawl-once [--no-push]`：执行一次采集。
-- `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集。
+- `qqzone-spectator crawl-once [--no-push]`：执行一次采集，可用于补抓历史动态。
+- `qqzone-spectator run [--interval SECONDS] [--no-push]`：循环采集，只处理本次启动后新发布的动态。
 - `qqzone-spectator export-pdf --target-qq QQ号 [--output 路径] [--limit N] [--no-images]`：导出单目标 PDF。
-- 全局参数：`--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`，默认 `INFO`。
+- 全局参数：`--log-level {DEBUG,INFO,WARNING,ERROR,CRITICAL}`、`--env-file PATH`；可写在子命令前后。
+
+示例：
+
+```bash
+qqzone-spectator run --interval 15 --log-level INFO
+qqzone-spectator --env-file .env.test crawl-once --no-push
+```
 
 ## PDF 导出说明
 
@@ -136,6 +147,7 @@ playwright install chromium
 2. 确保 OneBot HTTP API 可访问。
 3. 在 `.env` 配置 `ONEBOT_BASE_URL`、`ONEBOT_ACCESS_TOKEN`（如有）。
 4. 配置推送目标 `PUSH_PRIVATE_USERS` / `PUSH_GROUPS`。
+5. 若 OneBot 后端可配置 HTTP API 消息格式，请选择 `string`；本项目发送的是字符串消息，并使用 CQ 码拼接图片内容。
 
 项目会调用以下 OneBot 动作：
 
@@ -157,4 +169,5 @@ playwright install chromium
 - QQ 空间采集依赖 Cookie 和非官方接口，存在失效与风控风险。
 - 仅采集你有权限查看的内容，勿用于未授权场景。
 - 建议设置合理轮询间隔，避免请求过于频繁。
+- 若从旧测试版本升级，建议删除旧的 SQLite 文件后重新执行 `qqzone-spectator init-db`。
 - 本项目仅供学习和技术研究用途，请遵守相关平台规则与法律法规。

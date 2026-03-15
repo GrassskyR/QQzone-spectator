@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 import json
-import time
 from unittest.mock import patch
 
 import pytest
+import requests
 import responses
 
 from qqzone_spectator.collector.client import (
     MAX_PAGE_SIZE,
     QZONE_MSG_LIST_ENDPOINT,
     QzoneAPIError,
+    QzoneAuthError,
     QzoneClient,
     cookie_value,
     hash33,
@@ -170,3 +171,101 @@ class TestFetchPosts:
             posts = client.fetch_posts("200", num=1)
 
         assert len(posts) == 1
+
+    def test_request_exception_retries_then_succeeds(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with (
+            patch.object(
+                client,
+                "_fetch_page",
+                side_effect=[
+                    requests.RequestException("timeout"),
+                    {"code": 0, "msglist": [{"tid": "t1"}], "total": 1},
+                ],
+            ) as mock_fetch,
+            patch("qqzone_spectator.collector.client.time.sleep") as mock_sleep,
+        ):
+            posts = client.fetch_posts("200", num=1)
+
+        assert posts == [{"tid": "t1"}]
+        assert mock_fetch.call_count == 2
+        mock_sleep.assert_called_once_with(0.8)
+
+    def test_non_retryable_api_error_is_raised(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with patch.object(
+            client,
+            "_fetch_page",
+            side_effect=QzoneAPIError(-1, "bad request"),
+        ):
+            with pytest.raises(QzoneAPIError, match="bad request"):
+                client.fetch_posts("200", num=1)
+
+    def test_auth_error_is_not_retried(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with (
+            patch.object(
+                client,
+                "_fetch_page",
+                side_effect=QzoneAuthError(-3000, "请先登录空间"),
+            ) as mock_fetch,
+            patch("qqzone_spectator.collector.client.time.sleep") as mock_sleep,
+        ):
+            with pytest.raises(QzoneAuthError, match="请先登录空间"):
+                client.fetch_posts("200", num=1)
+
+        mock_fetch.assert_called_once()
+        mock_sleep.assert_not_called()
+
+    def test_returns_partial_posts_after_later_page_keeps_failing(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with (
+            patch.object(
+                client,
+                "_fetch_page",
+                side_effect=[
+                    {"code": 0, "msglist": [{"tid": "t1"}], "total": 3},
+                    QzoneAPIError(-10000, "server busy"),
+                    QzoneAPIError(-10000, "server busy"),
+                    QzoneAPIError(-10000, "server busy"),
+                ],
+            ),
+            patch("qqzone_spectator.collector.client.time.sleep"),
+        ):
+            posts = client.fetch_posts("200", num=2)
+
+        assert posts == [{"tid": "t1"}]
+
+    def test_dedupes_posts_across_pages(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with (
+            patch.object(
+                client,
+                "_fetch_page",
+                side_effect=[
+                    {"code": 0, "msglist": [{"tid": "t1"}, {"tid": "t2"}], "total": 25},
+                    {"code": 0, "msglist": [{"tid": "t2"}, {"tid": "t3"}], "total": 25},
+                ],
+            ),
+            patch("qqzone_spectator.collector.client.time.sleep"),
+        ):
+            posts = client.fetch_posts("200", num=25)
+
+        assert [post["tid"] for post in posts] == ["t1", "t2", "t3"]
+
+    def test_stops_when_msglist_is_not_a_list(self):
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+
+        with patch.object(
+            client,
+            "_fetch_page",
+            return_value={"code": 0, "msglist": {"tid": "t1"}, "total": 1},
+        ):
+            posts = client.fetch_posts("200", num=1)
+
+        assert posts == []

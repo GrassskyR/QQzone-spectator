@@ -29,6 +29,7 @@ def sample_post() -> QzonePost:
         content="Hello QZone",
         created_at="2025-01-01T00:00:00+00:00",
         source_payload=json.dumps({"tid": "tid_001", "uin": 123456, "content": "Hello QZone"}),
+        author_name="Tester",
         media=[
             MediaItem(url="https://example.com/img1.jpg"),
             MediaItem(url="https://example.com/img2.png"),
@@ -42,6 +43,7 @@ def sample_raw_post() -> dict:
     return {
         "tid": "tid_001",
         "uin": 123456,
+        "name": "Tester",
         "content": "Hello QZone",
         "created_time": 1704067200,  # 2024-01-01T00:00:00Z
         "pic": [
