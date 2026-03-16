@@ -10,7 +10,7 @@ import pytest
 
 from qqzone_spectator.config import AppConfig
 from qqzone_spectator.collector.downloader import MediaDownloader
-from qqzone_spectator.collector.client import QzoneAuthError, QzoneClient
+from qqzone_spectator.collector.client import QzoneAPIError, QzoneAuthError, QzoneClient
 from qqzone_spectator.db import Database
 from qqzone_spectator.models import MediaItem, QzonePost
 from qqzone_spectator.push.onebot import OneBotClient
@@ -59,6 +59,7 @@ def _make_service(
 
     mock_qzone = MagicMock(spec=QzoneClient)
     mock_downloader = MagicMock(spec=MediaDownloader)
+    mock_qzone.fetch_target_nickname.return_value = ""
 
     config = AppConfig(
         project_root=tmp_path,
@@ -117,6 +118,28 @@ class TestCrawlOnce:
         result = svc.crawl_once(push_enabled=False)
         assert result["fetched"] == 2
         assert result["inserted"] == 2
+
+    def test_populates_author_name_from_target_nickname(self, tmp_path: Path):
+        svc, db, mock_qzone, mock_dl = _make_service(tmp_path, targets=["123"])
+        mock_qzone.fetch_posts.return_value = [_make_raw_post("t1", name="空间名")]
+        mock_qzone.fetch_target_nickname.return_value = "士不可以不弘毅"
+        mock_dl.download_image.return_value = None
+
+        svc.crawl_once(push_enabled=False)
+
+        row = db.conn.execute("SELECT author_name FROM posts WHERE post_id = 't1'").fetchone()
+        assert row["author_name"] == "士不可以不弘毅"
+
+    def test_nickname_lookup_failure_keeps_author_name_empty(self, tmp_path: Path):
+        svc, db, mock_qzone, mock_dl = _make_service(tmp_path, targets=["123"])
+        mock_qzone.fetch_posts.return_value = [_make_raw_post("t1", name="空间名")]
+        mock_qzone.fetch_target_nickname.side_effect = QzoneAPIError(-1, "bad nickname")
+        mock_dl.download_image.return_value = None
+
+        svc.crawl_once(push_enabled=False)
+
+        row = db.conn.execute("SELECT author_name FROM posts WHERE post_id = 't1'").fetchone()
+        assert row["author_name"] == ""
 
     def test_duplicate_posts(self, tmp_path: Path):
         svc, db, mock_qzone, mock_dl = _make_service(tmp_path, targets=["123"])

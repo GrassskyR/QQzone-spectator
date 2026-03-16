@@ -37,6 +37,31 @@ def _parse_bool(value: str, *, default: bool = False) -> bool:
     return default
 
 
+def _resolve_project_root(default_root: Path, env_file: Path | None) -> Path:
+    raw_value = os.getenv("PROJECT_ROOT", "").strip()
+    if not raw_value:
+        return default_root
+
+    candidate = Path(raw_value).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+
+    if env_file is not None and env_file.exists():
+        return (env_file.resolve().parent / candidate).resolve()
+    return (default_root / candidate).resolve()
+
+
+def _resolve_storage_path(raw_value: str, *, project_root: Path, default_path: Path) -> Path:
+    text = raw_value.strip()
+    if not text:
+        return default_path
+
+    candidate = Path(text).expanduser()
+    if candidate.is_absolute():
+        return candidate.resolve()
+    return (project_root / candidate).resolve()
+
+
 @dataclass(slots=True)
 class AppConfig:
     project_root: Path
@@ -65,10 +90,18 @@ class AppConfig:
             load_dotenv()
 
         default_root = Path(__file__).resolve().parents[2]
-        project_root = Path(os.getenv("PROJECT_ROOT", str(default_root))).resolve()
+        project_root = _resolve_project_root(default_root, env_file)
 
-        db_path = Path(os.getenv("DB_PATH", str(project_root / "data" / "qqzone.db")))
-        media_dir = Path(os.getenv("MEDIA_DIR", str(project_root / "data" / "media")))
+        db_path = _resolve_storage_path(
+            os.getenv("DB_PATH", ""),
+            project_root=project_root,
+            default_path=project_root / "data" / "qqzone.db",
+        )
+        media_dir = _resolve_storage_path(
+            os.getenv("MEDIA_DIR", ""),
+            project_root=project_root,
+            default_path=project_root / "data" / "media",
+        )
 
         return cls(
             project_root=project_root,
