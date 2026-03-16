@@ -4,7 +4,9 @@ import logging
 import time
 from datetime import datetime, timezone
 
-from .collector import MediaDownloader, QzoneAuthError, QzoneClient, parse_posts
+import requests
+
+from .collector import MediaDownloader, QzoneAPIError, QzoneAuthError, QzoneClient, parse_posts
 from .config import AppConfig
 from .db import Database
 from .models import QzonePost
@@ -111,6 +113,7 @@ class SchedulerService:
                 LOGGER.info("TARGET_START qq=%s", target_qq)
                 raw_posts = self.qzone_client.fetch_posts(target_qq, num=self.config.fetch_limit)
                 posts = parse_posts(target_qq, raw_posts)
+                self._populate_author_names(target_qq, posts)
                 fetched_posts += len(posts)
 
                 LOGGER.info("TARGET_FETCHED qq=%s posts=%s", target_qq, len(posts))
@@ -245,6 +248,23 @@ class SchedulerService:
                 LOGGER.exception("crawl cycle failed")
 
             time.sleep(interval_seconds)
+
+    def _populate_author_names(self, target_qq: str, posts: list[QzonePost]) -> None:
+        if not posts:
+            return
+
+        try:
+            nickname = self.qzone_client.fetch_target_nickname(target_qq)
+        except (QzoneAPIError, requests.RequestException, ValueError) as exc:
+            LOGGER.warning("TARGET_NICKNAME_LOOKUP_FAILED qq=%s error=%s", target_qq, exc)
+            return
+
+        if not nickname:
+            return
+
+        for post in posts:
+            if not post.author_qq or post.author_qq == target_qq:
+                post.author_name = nickname
 
     def _download_post_media(self, post: QzonePost) -> list[str]:
         downloaded: list[str] = []

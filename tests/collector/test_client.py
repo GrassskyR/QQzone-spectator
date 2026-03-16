@@ -10,6 +10,7 @@ import responses
 
 from qqzone_spectator.collector.client import (
     MAX_PAGE_SIZE,
+    QZONE_FEEDS_HTML_MODULE_ENDPOINT,
     QZONE_MSG_LIST_ENDPOINT,
     QzoneAPIError,
     QzoneAuthError,
@@ -269,3 +270,64 @@ class TestFetchPosts:
             posts = client.fetch_posts("200", num=1)
 
         assert posts == []
+
+
+class TestFetchTargetNickname:
+    @responses.activate
+    def test_success(self):
+        body = """
+        <html>
+          <body>
+            <a href="https://user.qzone.qq.com/other">Other</a>
+            <a href="https://user.qzone.qq.com/1224944928">士不可以不弘毅</a>
+          </body>
+        </html>
+        """
+        responses.get(QZONE_FEEDS_HTML_MODULE_ENDPOINT, body=body, status=200)
+
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+        nickname = client.fetch_target_nickname("1224944928")
+
+        assert nickname == "士不可以不弘毅"
+        assert "i_login_uin=100" in responses.calls[0].request.url
+        assert "i_uin=1224944928" in responses.calls[0].request.url
+        assert responses.calls[0].request.headers["Referer"] == "https://user.qzone.qq.com/1224944928"
+
+    @responses.activate
+    def test_returns_empty_when_name_not_found(self):
+        responses.get(
+            QZONE_FEEDS_HTML_MODULE_ENDPOINT,
+            body="<html><body><span>no nickname here</span></body></html>",
+            status=200,
+        )
+
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+        assert client.fetch_target_nickname("1224944928") == ""
+
+    @responses.activate
+    def test_auth_error_is_raised(self):
+        responses.get(
+            QZONE_FEEDS_HTML_MODULE_ENDPOINT,
+            body='<script>window.__DATA__={"code":-4001,"message":"请先登录"}</script>',
+            status=200,
+        )
+
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+        with pytest.raises(QzoneAuthError, match="请先登录"):
+            client.fetch_target_nickname("1224944928")
+
+    @responses.activate
+    def test_uses_nickname_cache(self):
+        responses.get(
+            QZONE_FEEDS_HTML_MODULE_ENDPOINT,
+            body='<a href="https://user.qzone.qq.com/1224944928">士不可以不弘毅</a>',
+            status=200,
+        )
+
+        client = QzoneClient("100", "uin=o100; p_skey=skey123;")
+        first = client.fetch_target_nickname("1224944928")
+        second = client.fetch_target_nickname("1224944928")
+
+        assert first == "士不可以不弘毅"
+        assert second == "士不可以不弘毅"
+        assert len(responses.calls) == 1

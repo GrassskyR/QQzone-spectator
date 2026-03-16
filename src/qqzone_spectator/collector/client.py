@@ -4,12 +4,19 @@ import json
 import logging
 import re
 import time
+from html.parser import HTMLParser
 from typing import Any
 
 import requests
 
 QZONE_MSG_LIST_ENDPOINT = (
     "https://h5.qzone.qq.com/proxy/domain/taotao.qq.com/cgi-bin/emotion_cgi_msglist_v6"
+)
+QZONE_FEEDS_HTML_MODULE_ENDPOINT = (
+    "https://user.qzone.qq.com/proxy/domain/ic2.qzone.qq.com/cgi-bin/feeds/feeds_html_module"
+)
+QZONE_FEEDS_HTML_MORE_CGI = (
+    "http://ic2.s8.qzone.qq.com/cgi-bin/feeds/feeds_html_act_all"
 )
 
 MAX_PAGE_SIZE = 20
@@ -19,6 +26,45 @@ PAGE_RETRY_BACKOFF_SECONDS = 0.8
 PAGE_INTERVAL_SECONDS = 0.25
 
 LOGGER = logging.getLogger(__name__)
+
+
+class QzoneNicknameParser(HTMLParser):
+    def __init__(self, target_qq: str) -> None:
+        super().__init__()
+        self.target_qq = target_qq
+        self.capture = False
+        self.chunks: list[str] = []
+        self.names: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag != "a":
+            return
+
+        attr_map = dict(attrs)
+        href = attr_map.get("href") or ""
+        if f"user.qzone.qq.com/{self.target_qq}" not in href:
+            return
+
+        self.capture = True
+        self.chunks = []
+
+    def handle_data(self, data: str) -> None:
+        if not self.capture:
+            return
+
+        text = data.strip()
+        if text:
+            self.chunks.append(text)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag != "a" or not self.capture:
+            return
+
+        nickname = "".join(self.chunks).strip()
+        if nickname:
+            self.names.append(nickname)
+        self.capture = False
+        self.chunks = []
 
 
 class QzoneAPIError(RuntimeError):
@@ -56,6 +102,7 @@ class QzoneClient:
         self.cookie = cookie.strip()
         self.timeout = timeout
         self.session = requests.Session()
+        self._nickname_cache: dict[str, str] = {}
 
         if not self.uin:
             raise ValueError("QZONE_UIN is required")
@@ -66,6 +113,55 @@ class QzoneClient:
         if not skey:
             raise ValueError("QZONE_COOKIE must contain p_skey or skey")
         self.g_tk = hash33(skey)
+
+    def fetch_target_nickname(self, target_qq: str) -> str:
+        normalized_target = target_qq.strip()
+        if not normalized_target:
+            return ""
+
+        cached = self._nickname_cache.get(normalized_target)
+        if cached is not None:
+            return cached
+
+        response = self.session.get(
+            QZONE_FEEDS_HTML_MODULE_ENDPOINT,
+            params={
+                "g_iframeUser": 1,
+                "i_uin": normalized_target,
+                "i_login_uin": self.uin,
+                "mode": 4,
+                "previewV8": 1,
+                "style": 1,
+                "version": 8,
+                "needDelOpr": "true",
+                "transparence": "true",
+                "hideExtend": "false",
+                "showcount": 10,
+                "MORE_FEEDS_CGI": QZONE_FEEDS_HTML_MORE_CGI,
+                "refer": 2,
+                "paramstring": "os-winxp|100",
+                "g_tk": self.g_tk,
+            },
+            headers=self._build_headers(normalized_target),
+            timeout=self.timeout,
+        )
+        response.raise_for_status()
+        response.encoding = "utf-8"
+        html = response.text
+
+        error = self._extract_feeds_html_error(html)
+        if error is not None:
+            code, message = error
+            raise QzoneAuthError(code, message)
+
+        parser = QzoneNicknameParser(normalized_target)
+        parser.feed(html)
+        parser.close()
+
+        nickname = parser.names[0] if parser.names else ""
+        if nickname:
+            self._nickname_cache[normalized_target] = nickname
+        return nickname
 
     def fetch_posts(self, target_qq: str, *, pos: int = 0, num: int = 20) -> list[dict[str, Any]]:
         expected_total = max(1, int(num))
@@ -189,16 +285,6 @@ class QzoneClient:
         return posts[:expected_total]
 
     def _fetch_page(self, target_qq: str, *, pos: int, num: int) -> dict[str, Any]:
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
-            ),
-            "Referer": f"https://user.qzone.qq.com/{target_qq}",
-            "Cookie": self.cookie,
-        }
-
         params = {
             "uin": target_qq,
             "hostUin": target_qq,
@@ -217,7 +303,7 @@ class QzoneClient:
         response = self.session.get(
             QZONE_MSG_LIST_ENDPOINT,
             params=params,
-            headers=headers,
+            headers=self._build_headers(target_qq),
             timeout=self.timeout,
         )
         response.raise_for_status()
@@ -232,6 +318,34 @@ class QzoneClient:
             raise QzoneAPIError(normalized_code, str(message))
 
         return payload
+
+    def _build_headers(self, target_qq: str) -> dict[str, str]:
+        return {
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            "Referer": f"https://user.qzone.qq.com/{target_qq}",
+            "Origin": "https://user.qzone.qq.com",
+            "Cookie": self.cookie,
+        }
+
+    @staticmethod
+    def _extract_feeds_html_error(text: str) -> tuple[int, str] | None:
+        code_match = re.search(r'"code"\s*:\s*(-?\d+)', text)
+        if code_match is None:
+            code_match = re.search(r"\bcode\s*[:=]\s*(-?\d+)", text)
+        if code_match is None:
+            return None
+
+        code = int(code_match.group(1))
+        if code not in {-3000, -4001}:
+            return None
+
+        message_match = re.search(r'"(?:message|msg)"\s*:\s*"([^"]*)"', text)
+        message = message_match.group(1).strip() if message_match else "nickname lookup requires login"
+        return code, message
 
     @staticmethod
     def _safe_int(value: object) -> int | None:

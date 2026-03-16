@@ -90,6 +90,7 @@ class TestAppConfig:
         assert cfg.push_groups == [444, 555]
 
     def test_push_enabled_defaults_false(self, monkeypatch):
+        monkeypatch.setattr("qqzone_spectator.config.load_dotenv", lambda *args, **kwargs: None)
         monkeypatch.setenv("QZONE_UIN", "1")
         monkeypatch.setenv("QZONE_COOKIE", "x")
         monkeypatch.delenv("PUSH_ENABLED", raising=False)
