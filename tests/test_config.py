@@ -99,6 +99,59 @@ class TestAppConfig:
 
         assert cfg.push_enabled is False
 
+    def test_empty_db_and_media_use_project_root_defaults(self, monkeypatch, tmp_path):
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "\n".join(
+                [
+                    "PROJECT_ROOT=.",
+                    "QZONE_UIN=1",
+                    "QZONE_COOKIE=x",
+                    "DB_PATH=",
+                    "MEDIA_DIR=",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("DB_PATH", raising=False)
+        monkeypatch.delenv("MEDIA_DIR", raising=False)
+        monkeypatch.delenv("QZONE_UIN", raising=False)
+        monkeypatch.delenv("QZONE_COOKIE", raising=False)
+
+        cfg = AppConfig.from_env(env_file=env_file)
+
+        assert cfg.project_root == tmp_path.resolve()
+        assert cfg.db_path == (tmp_path / "data" / "qqzone.db").resolve()
+        assert cfg.media_dir == (tmp_path / "data" / "media").resolve()
+
+    def test_relative_db_and_media_paths_resolve_from_project_root(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("qqzone_spectator.config.load_dotenv", lambda *args, **kwargs: None)
+        monkeypatch.setenv("PROJECT_ROOT", str(tmp_path))
+        monkeypatch.setenv("QZONE_UIN", "1")
+        monkeypatch.setenv("QZONE_COOKIE", "x")
+        monkeypatch.setenv("DB_PATH", "custom/db.sqlite")
+        monkeypatch.setenv("MEDIA_DIR", "custom/media")
+
+        cfg = AppConfig.from_env(env_file=None)
+
+        assert cfg.db_path == (tmp_path / "custom" / "db.sqlite").resolve()
+        assert cfg.media_dir == (tmp_path / "custom" / "media").resolve()
+
+    def test_absolute_db_and_media_paths_are_used_as_is(self, monkeypatch, tmp_path):
+        monkeypatch.setattr("qqzone_spectator.config.load_dotenv", lambda *args, **kwargs: None)
+        absolute_db = (tmp_path / "abs" / "db.sqlite").resolve()
+        absolute_media = (tmp_path / "abs" / "media").resolve()
+        monkeypatch.setenv("QZONE_UIN", "1")
+        monkeypatch.setenv("QZONE_COOKIE", "x")
+        monkeypatch.setenv("DB_PATH", str(absolute_db))
+        monkeypatch.setenv("MEDIA_DIR", str(absolute_media))
+
+        cfg = AppConfig.from_env(env_file=None)
+
+        assert cfg.db_path == absolute_db
+        assert cfg.media_dir == absolute_media
+
     def test_fetch_limit_minimum(self, monkeypatch):
         monkeypatch.setenv("FETCH_LIMIT", "0")
         monkeypatch.setenv("QZONE_UIN", "1")

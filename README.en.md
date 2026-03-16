@@ -105,9 +105,9 @@ Main variables in `.env.example`:
 - `QZONE_UIN`: your QQ number used in request parameters.
 - `QZONE_COOKIE`: full login cookie, must include `p_skey` or `skey`.
 - `TARGET_QQS`: target QQ accounts to crawl, comma-separated.
-- `PROJECT_ROOT`: project root directory, default is the current repository root.
-- `DB_PATH`: SQLite path, default `data/qqzone.db`.
-- `MEDIA_DIR`: image download directory, default `data/media`.
+- `PROJECT_ROOT`: project root directory; when empty it defaults to the current project directory, and relative values are resolved from the `.env` location.
+- `DB_PATH`: SQLite path; when empty it defaults to `project_root/data/qqzone.db`, absolute paths are used as-is, and relative paths are resolved from `PROJECT_ROOT`.
+- `MEDIA_DIR`: image download directory; when empty it defaults to `project_root/data/media`, absolute paths are used as-is, and relative paths are resolved from `PROJECT_ROOT`.
 - `FETCH_LIMIT`: number of posts per request.
 - `POLL_INTERVAL_SECONDS`: loop mode interval in seconds.
 - `REQUEST_TIMEOUT`: network timeout in seconds.
